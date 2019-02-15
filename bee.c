@@ -8,6 +8,12 @@
 #define DEFLEN        255
 #define SAMPLELEN     255
 #define LISTLEN       1000
+#define STATSFILE     "stats.txt"
+
+
+#define bool        int
+#define true        1
+#define false       0
 
 typedef struct tagWord
 {
@@ -20,12 +26,38 @@ typedef struct tagWord
 } Word;
 typedef struct tagstats
 {
-    int asked, answered;
-    int select, correct;
-    int retry, help;
-    float correctratio ;
+    int asked;
+    int correct;
+    int help;
 
 } Stats;
+int loadstats(Stats *info , char *filename) {
+    FILE *fp;
+
+    fp = fopen(filename, "r");
+    if (fp == NULL) {
+        return 0;
+    }
+
+    fread(info, sizeof(Stats), 1, fp);
+    fclose(fp);
+    return 0;
+}
+int savestats(Stats *info , char *filename) {
+    FILE *fp;
+
+    fp = fopen(filename, "w");
+    if (fp == NULL) {
+        return 0;
+    }
+
+    fwrite(info,sizeof(Stats), 1, fp);
+    fclose(fp);
+    return 0;
+}
+
+
+
 
 void changeclass(char src[], char dst[]) {
     if (strcmp(src,  "adj")==0) {
@@ -181,9 +213,13 @@ int play( char *audio_file) {
 
 int main(int argc, char *argv[])
 {
+
+
     Stats info;
     char more;
     char buff[255];
+    char buff2[255];
+    char filename[255];
     int wordnum;
     int selected_grade;
     Word *list;
@@ -215,6 +251,8 @@ int main(int argc, char *argv[])
         free (list);
         return 1;
     }
+    printf("c-class,d-definition,r-read again,q-quit, clear-clear progress\n");
+    printf("--------------------------------------------------------------\n");
 
     int selected_total = 0;
     //initalize the random number generator
@@ -234,16 +272,20 @@ int main(int argc, char *argv[])
 
     more = 'h';
     int select = 0;
+    printf("enter username: ");
+    scanf("%s" , buff2);
+    strcat(buff2 , ".txt");
     memset(&info, 0, sizeof(info));
+    loadstats(&info , buff2);
     while (more != 'q' && select++ < selected_total) {
         wordnum = index[select];
         ++info.asked;
-        int failed = 0;
+        bool donotcount = false;
         for (;;) {
             fseek(stdin,0,SEEK_END);
             read_word(list[wordnum].word);
-            printf("[%d]Enter the word spelling(c-class,d-definition,r-read again,q-quit): ", list[wordnum].grade);
-            scanf("%s", &buff );
+            printf("[%d:%03d]Enter the word spelling: ", list[wordnum].grade, select);
+            scanf("%s", buff );
             if (strcmp(buff, "c")==0) {
                 read(list[wordnum].class);
                 info.help++;
@@ -256,40 +298,52 @@ int main(int argc, char *argv[])
 
             else if (strcmp(buff, "r")==0) {
                 read(list[wordnum].word);
-                info.help++;
+              
             }
             else if (strcmp(buff, "?")==0) {
                 printf("%s\n", list[wordnum].word);
-                ++failed;
+                donotcount=true;
                 break;
             }
             else if (strcmp(buff, "q")==0) {
                 more = 'q';
-
+                donotcount=true;
+                --info.asked;
                 break;
             }
+            else if (strcmp(buff, "clear")==0){
+             remove(STATSFILE);
+             memset(&info, 0, sizeof(info));
+             ++info.asked;
+         }
+             
             else if (strcmp(list[wordnum].word, buff)==0) {
-                play("perfect.wav");
-                if (info.retry != 1) {
+               
+                if (!donotcount) {
                     info.correct++;
+                     play("perfect.wav");
                 }
-                info.retry = 0;
+                else {
+                    read("you finally passed the question! Yay!");
+                }
+              
                 break;
             }
             else {
-                ++failed;
+                donotcount=true;
                 play("sorry.wav");
-                info.retry = 1;
+                              
             }
         }
-        info.answered++;
+        
     }
-    info.select += select;
 
-    info.correctratio = (float)info.correct/info.answered;
+  
+    savestats(&info , buff2);
     play("bye.wav");
     free (list);
-    printf("your correct percentage or ratio was %d out of %d or %.3f%\n", info.correct, info.answered, info.correctratio*100   );
+    printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
+    printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n" , info.help, info.asked*2 , (float)info.help/info.asked*2*100);
     return 0;
 }
 
