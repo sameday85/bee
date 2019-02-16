@@ -28,7 +28,7 @@ typedef struct tagWord
     char sample[SAMPLELEN];
 } Word;
 
-typedef struct tagstats
+typedef struct tagStats
 {
     int asked;
     int correct;
@@ -38,7 +38,7 @@ typedef struct tagstats
 
 int play( char *audio_file);
 
-int loadstats(Stats *info , char *filename) {
+int loadstats(Stats *info, char *filename) {
     FILE *fp;
 
     fp = fopen(filename, "r");
@@ -51,7 +51,7 @@ int loadstats(Stats *info , char *filename) {
     return 0;
 }
 
-int savestats(Stats *info , char *filename) {
+int savestats(Stats *info, char *filename) {
     FILE *fp;
 
     fp = fopen(filename, "w");
@@ -91,42 +91,42 @@ void print_word(Word *pword) {
 //http://ssl.gstatic.com/dictionary/static/sounds/oxford/persistent--_us_1.mp3
 bool download (char *word, char *filename) {
     struct addrinfo hints, *servinfo;
-    
+
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC; // use AF_INET6 to force IPv6
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo("ssl.gstatic.com", "http", &hints, &servinfo) != 0) {
         return false;
     }
-    
+
     int total_len = 0;
     //Create socket
-    int socket_desc = socket(AF_INET , SOCK_STREAM , 0);
+    int socket_desc = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_desc != -1) {
         //Connect to remote server
-        if (connect(socket_desc, (struct sockaddr *)servinfo->ai_addr , servinfo->ai_addrlen) == 0){
+        if (connect(socket_desc, (struct sockaddr *)servinfo->ai_addr, servinfo->ai_addrlen) == 0) {
             //Send request
             char message[255];
-            sprintf(message, "GET /dictionary/static/sounds/oxford/%s--_us_1.mp3 HTTP/1.1\r\nHost: ssl.gstatic.com\r\n\r\n Connection: keep-alive\r\n\r\n Keep-Alive: 300\r\n", word);
-            if (send(socket_desc , message , strlen(message) , 0) > 0) {
+            sprintf(message, "GET /dictionary/static/sounds/oxford/%s--_us_1.mp3 HTTP/1.1\r\nHost: ssl.gstatic.com\r\nConnection: close\r\n\r\n", word);
+            if (send(socket_desc, message, strlen(message), 0) > 0) {
                 FILE *file = fopen(filename, "w");
-                if (file){
+                if (file) {
                     char server_reply[10000];
                     while(1) {
-                        int len = recv(socket_desc, server_reply , sizeof(server_reply), 0);
+                        int len = recv(socket_desc, server_reply, sizeof(server_reply), 0);
                         if (len <= 0 )
                             break;
-                        fwrite(server_reply , len , 1, file);
+                        fwrite(server_reply, len, 1, file);
                         total_len += len;
                     }
-                    fclose(file);    
+                    fclose(file);
                 }
             }
         }
         shutdown (socket_desc, SHUT_RD);
     }
     freeaddrinfo(servinfo);
-    
+
     return total_len > 0 ? true : false;
 }
 /*
@@ -175,19 +175,9 @@ int load_word(FILE *fp, Word *pword, int grade, int sequence) {
     print_word(pword);
 }
 
-//load word list from given file
-//@return total number of words loaded
-int load (char* filename, Word* list) {
-    FILE *fp;
+int loadV10 (FILE *fp, Word* list) {
     char *str, buff[1000];
     int wordcount = 0;
-
-
-    fp = fopen(filename, "r");
-    if (fp==NULL) {
-        printf("File does not exist\n");
-        return wordcount;
-    }
 
     int grade = 1, word_sequence = 1;
     str = fgets(buff, sizeof(buff), fp);
@@ -206,7 +196,64 @@ int load (char* filename, Word* list) {
         str = fgets(buff, sizeof(buff), fp);
         trim(buff);
     }
-    fclose(fp);
+
+    return wordcount;
+}
+
+int loadV11 (FILE *fp, Word* list) {
+    char *str, buff[1000];
+    int wordcount = 0;
+
+    int grade = 0, word_sequence = 1;
+    str = fgets(buff, sizeof(buff), fp);
+    while (str!= NULL) {
+        trim(buff);
+        if (strlen (buff) <= 0)
+            break;
+        ++wordcount;
+        list[wordcount].grade = 0;
+        list[wordcount].seq   = wordcount;
+        
+        strcpy (list[wordcount].word, buff);
+        fgets(buff, sizeof(buff), fp);
+        trim(buff);
+        strcpy (list[wordcount].def, buff);
+        //skip blank line
+        fgets(buff, sizeof(buff), fp);
+
+        str = fgets(buff, sizeof(buff), fp);
+        trim(buff);
+    }
+
+    return wordcount;
+}
+
+
+//load word list from given file
+//@return total number of words loaded
+int load (char* filename, Word* list) {
+    char *str, buff[1000];
+    int wordcount = 0;
+
+    FILE *fp = fopen(filename, "r");
+    if (fp==NULL) {
+        printf("File does not exist\n");
+        return wordcount;
+    }
+    str = fgets(buff, sizeof(buff), fp);
+    if (str) {
+        trim(buff);
+        if (strcmp (buff, "#Ver1.0") == 0) {
+            wordcount = loadV10(fp, list);
+        }
+        else if (strcmp (buff, "#Ver1.1") == 0) {
+            wordcount = loadV11(fp, list);
+        }
+        else {
+            printf("Not supported file format\n");
+        }
+    }
+    fclose (fp);
 
     return wordcount;
 }
@@ -241,10 +288,10 @@ void read_word(char *word) {
     if (strlen(word) <= 0)
         return;
     char voice[255];
-    sprintf(voice , "voice/%s.mp3", word);
-    
+    sprintf(voice, "voice/%s.mp3", word);
+
     bool mp3_available = false;
-    
+
     FILE *file = fopen (voice, "r");
     if (file == NULL) {
         if (download(word, voice)) {
@@ -255,7 +302,7 @@ void read_word(char *word) {
         fclose (file);
         mp3_available = true;
     }
-    
+
     if (mp3_available) {
         play(voice);
     }
@@ -292,6 +339,7 @@ int main(int argc, char *argv[])
     int  index[LISTLEN];
     //dictionary file path
     char dict[255];
+    
     //default dictionary
     strcpy(dict, "dict/SpellingBee2018.txt");
     selected_grade = 3;
@@ -325,7 +373,7 @@ int main(int argc, char *argv[])
     //initalize the random number generator
     srand(time(0));
     for (int i = 0; i < total; ++i) {
-        if (selected_grade == 0 || list[i].grade == selected_grade) {
+        if (selected_grade == 0 || list[i].grade == 0 || list[i].grade == selected_grade) {
             index[selected_total++]=i;
         }
     }
@@ -339,11 +387,12 @@ int main(int argc, char *argv[])
 
     more = 'h';
     int select = 0;
+    read("enter username");
     printf("enter username: ");
-    scanf("%s" , buff2);
-    strcat(buff2 , ".txt");
+    scanf("%s", buff2);
+    strcat(buff2, ".txt");
     memset(&info, 0, sizeof(info));
-    loadstats(&info , buff2);
+    loadstats(&info, buff2);
     while (more != 'q' && select++ < selected_total) {
         wordnum = index[select];
         ++info.asked;
@@ -377,38 +426,33 @@ int main(int argc, char *argv[])
                 --info.asked;
                 break;
             }
-            else if (strcmp(buff, "clear")==0){
-             remove(STATSFILE);
-             memset(&info, 0, sizeof(info));
-             ++info.asked;
-         }
-             
+            else if (strcmp(buff, "clear")==0) {
+                remove(STATSFILE);
+                memset(&info, 0, sizeof(info));
+                ++info.asked;
+            }
             else if (strcmp(list[wordnum].word, buff)==0) {
-               
                 if (!donotcount) {
                     info.correct++;
-                     play("perfect.wav");
+                    play("perfect.wav");
                 }
                 else {
                     read("you finally passed the question! Yay!");
                 }
-              
                 break;
             }
             else {
                 donotcount=true;
                 play("sorry.wav");
-                              
             }
         }
-        
     }
 
-    savestats(&info , buff2);
+    savestats(&info, buff2);
     play("bye.wav");
     free (list);
     printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
-    printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n" , info.help, info.asked*2 , (float)info.help/info.asked*2*100);
+    printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.asked*2*100);
+    
     return 0;
 }
-
