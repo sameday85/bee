@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 
 #define WORDLEN       25
 #define CLASSLEN      15
@@ -24,6 +27,7 @@ typedef struct tagWord
     char def[DEFLEN];
     char sample[SAMPLELEN];
 } Word;
+
 typedef struct tagstats
 {
     int asked;
@@ -31,6 +35,9 @@ typedef struct tagstats
     int help;
 
 } Stats;
+
+int play( char *audio_file);
+
 int loadstats(Stats *info , char *filename) {
     FILE *fp;
 
@@ -43,6 +50,7 @@ int loadstats(Stats *info , char *filename) {
     fclose(fp);
     return 0;
 }
+
 int savestats(Stats *info , char *filename) {
     FILE *fp;
 
@@ -55,9 +63,6 @@ int savestats(Stats *info , char *filename) {
     fclose(fp);
     return 0;
 }
-
-
-
 
 void changeclass(char src[], char dst[]) {
     if (strcmp(src,  "adj")==0) {
@@ -80,6 +85,49 @@ void trim(char *str) {
 void print_word(Word *pword) {
     //if (pword->seq == 53)
     //printf ("[%d-%d]%s:%s:%s\n", pword->grade, pword->seq, pword->word, pword->class, pword->def);
+}
+
+//https://stackoverflow.com/questions/24321295/how-can-i-download-a-file-using-c-socket-programming
+//http://ssl.gstatic.com/dictionary/static/sounds/oxford/persistent--_us_1.mp3
+bool download (char *word, char *filename) {
+    struct addrinfo hints, *servinfo;
+    
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC; // use AF_INET6 to force IPv6
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo("ssl.gstatic.com", "http", &hints, &servinfo) != 0) {
+        return false;
+    }
+    
+    int total_len = 0;
+    //Create socket
+    int socket_desc = socket(AF_INET , SOCK_STREAM , 0);
+    if (socket_desc != -1) {
+        //Connect to remote server
+        if (connect(socket_desc, (struct sockaddr *)servinfo->ai_addr , servinfo->ai_addrlen) == 0){
+            //Send request
+            char message[255];
+            sprintf(message, "GET /dictionary/static/sounds/oxford/%s--_us_1.mp3 HTTP/1.1\r\nHost: ssl.gstatic.com\r\n\r\n Connection: keep-alive\r\n\r\n Keep-Alive: 300\r\n", word);
+            if (send(socket_desc , message , strlen(message) , 0) > 0) {
+                FILE *file = fopen(filename, "w");
+                if (file){
+                    char server_reply[10000];
+                    while(1) {
+                        int len = recv(socket_desc, server_reply , sizeof(server_reply), 0);
+                        if (len <= 0 )
+                            break;
+                        fwrite(server_reply , len , 1, file);
+                        total_len += len;
+                    }
+                    fclose(file);    
+                }
+            }
+        }
+        shutdown (socket_desc, SHUT_RD);
+    }
+    freeaddrinfo(servinfo);
+    
+    return total_len > 0 ? true : false;
 }
 /*
 15.
@@ -192,10 +240,30 @@ void read2(char *sentence) {
 void read_word(char *word) {
     if (strlen(word) <= 0)
         return;
-
-    char command[255];
-    sprintf(command, "omxplayer http://ssl.gstatic.com/dictionary/static/sounds/oxford/%s--_us_1.mp3 >/dev/null", word);
-    system(command );
+    char voice[255];
+    sprintf(voice , "voice/%s.mp3", word);
+    
+    bool mp3_available = false;
+    
+    FILE *file = fopen (voice, "r");
+    if (file == NULL) {
+        if (download(word, voice)) {
+            mp3_available = true;
+        }
+    }
+    else {
+        fclose (file);
+        mp3_available = true;
+    }
+    
+    if (mp3_available) {
+        play(voice);
+    }
+    else {
+        char command[255];
+        sprintf(command, "omxplayer http://ssl.gstatic.com/dictionary/static/sounds/oxford/%s--_us_1.mp3 >/dev/null", word);
+        system(command );
+    }
 }
 
 int play( char *audio_file) {
@@ -213,8 +281,6 @@ int play( char *audio_file) {
 
 int main(int argc, char *argv[])
 {
-
-
     Stats info;
     char more;
     char buff[255];
@@ -227,7 +293,7 @@ int main(int argc, char *argv[])
     //dictionary file path
     char dict[255];
     //default dictionary
-    strcpy(dict, "SpellingBee2018.txt");
+    strcpy(dict, "dict/SpellingBee2018.txt");
     selected_grade = 3;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--help")==0) {
@@ -239,7 +305,8 @@ int main(int argc, char *argv[])
             selected_grade = argv[i][7]-'0';
         }
         else {
-            strcpy (dict, argv[i]);
+            strcpy (dict, "dict/");
+            strcat (dict, argv[i]);
         }
     }
     if (selected_grade < 1 || selected_grade > 8)
@@ -297,8 +364,7 @@ int main(int argc, char *argv[])
             }
 
             else if (strcmp(buff, "r")==0) {
-                read(list[wordnum].word);
-              
+                read_word(list[wordnum].word);
             }
             else if (strcmp(buff, "?")==0) {
                 printf("%s\n", list[wordnum].word);
@@ -338,7 +404,6 @@ int main(int argc, char *argv[])
         
     }
 
-  
     savestats(&info , buff2);
     play("bye.wav");
     free (list);
