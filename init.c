@@ -64,11 +64,27 @@ bool load_credentials() {
     fclose(fp);
 }
 
-int call (char *word, char *definitions) {
+bool parse_json(char *json, char *tag, char *sub_tag, char *value) {
+    char *ptr = strstr(json, tag);
+    if (ptr) {
+        ptr += strlen (tag);
+        if (sub_tag) {
+            ptr = strstr(ptr, sub_tag);
+            ptr += strlen(sub_tag);
+        }
+        char *ptr1 = strchr (ptr, '\"');
+        char *ptr2 = strchr (ptr1 + 1, '\"');
+        int len = ptr2 - ptr1 - 1;
+        strncpy (value, ptr1 + 1, len);
+        value[len]='\0';
+    }
+    return strlen(value) > 0 ? true : false;
+}
+
+int call (char *word, char *category, char *definitions, char *example, char *audio) {
     struct addrinfo hints, *servinfo;
-    char *szTag="\"definitions\":";
     
-    definitions[0]='\0';
+    category[0]=definitions[0]=example[0]=audio[0]='\0';
     
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC; // use AF_INET6 to force IPv6
@@ -106,14 +122,10 @@ int call (char *word, char *definitions) {
                 if (strstr(server_reply, "Authentication failed")) {
                     printf("*****Authentication failed\n");
                 }
-                char *ptr = strstr(server_reply, szTag);
-                if (ptr) {
-                    ptr += strlen (szTag);
-                    char *ptr1 = strchr (ptr, '\"');
-                    char *ptr2 = strchr (ptr1 + 1, '\"');
-                    *ptr2 = '\0';
-                    strcpy (definitions, ptr1 + 1);
-                }
+                parse_json(server_reply, "\"lexicalCategory\"", NULL, category);
+                parse_json(server_reply, "\"definitions\"", NULL, definitions);
+                parse_json(server_reply, "\"examples\"", "\"text\"", example);
+                parse_json(server_reply, "\"audioFile\"", NULL, audio);
                 SSL_free(ssl);
                 free(server_reply);
             }
@@ -131,7 +143,10 @@ int main(int argc, char *argv[])
 {
     char filename[255];
     char output[255];
+    char category[50];
     char definitions[2048];
+    char example[255];
+    char audio[255];
     char buff[255];
     char *version="#Ver1.1\r\n";
     bool done = false;
@@ -143,8 +158,8 @@ int main(int argc, char *argv[])
     if (argc > 1) {
         if (strcmp(argv[1], "--test") == 0) {
             strcpy (buff, "shampoo");
-            call(buff, definitions);
-            printf("%s:%s\n", buff, definitions);
+            call(buff, category, definitions, example, audio);
+            printf("%s:%s,%s(%s)\n", buff, category, definitions, example);
 
             done = true;
         }
@@ -173,13 +188,26 @@ int main(int argc, char *argv[])
     str = fgets(buff, sizeof(buff), fp);
     while (str!= NULL) {
         trim(buff);
-        call(buff, definitions);
-        printf("%s:%s\n", buff, definitions);
+        call(buff, category, definitions, example, audio);
+        printf("%s:%s,%s[%s]\n", buff, category, definitions, example);
         
+        //word
         fwrite (buff, strlen(buff), 1, fpOutput);
         fwrite ("\r\n", 2, 1, fpOutput);
+        //category
+        fwrite (category, strlen(category), 1, fpOutput);
+        fwrite ("\r\n", 2, 1, fpOutput);
+        //definition
         fwrite (definitions, strlen(definitions), 1, fpOutput);
-        fwrite ("\r\n\r\n", 4, 1, fpOutput);
+        fwrite ("\r\n", 2, 1, fpOutput);
+        //example
+        fwrite (example, strlen(example), 1, fpOutput);
+        fwrite ("\r\n", 2, 1, fpOutput);
+        //audio
+        fwrite (audio, strlen(audio), 1, fpOutput);
+        fwrite ("\r\n", 2, 1, fpOutput);
+        //end
+        fwrite ("\r\n", 2, 1, fpOutput);
         //60 calls per minute
         usleep(1500 * 1000);
         str = fgets(buff, sizeof(buff), fp);

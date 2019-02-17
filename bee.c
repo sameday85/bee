@@ -10,8 +10,8 @@
 #define CLASSLEN      15
 #define DEFLEN        255
 #define SAMPLELEN     255
+#define AUDIOLEN     255
 #define LISTLEN       1000
-#define STATSFILE     "stats.txt"
 
 
 #define bool        int
@@ -26,6 +26,7 @@ typedef struct tagWord
     char class[CLASSLEN];
     char def[DEFLEN];
     char sample[SAMPLELEN];
+    char audio[AUDIOLEN];
 } Word;
 
 typedef struct tagStats
@@ -36,8 +37,6 @@ typedef struct tagStats
     float possiblehelp;
 
 } Stats;
-
-int play( char *audio_file);
 
 int loadstats(Stats *info, char *filename) {
     FILE *fp;
@@ -89,14 +88,24 @@ void print_word(Word *pword) {
 }
 
 //https://stackoverflow.com/questions/24321295/how-can-i-download-a-file-using-c-socket-programming
-//http://ssl.gstatic.com/dictionary/static/sounds/oxford/persistent--_us_1.mp3
-bool download (char *word, char *filename) {
+//only http protocol supported
+bool download_url (char *url, char *filename) {
+    char *prefix="http://";
+    if (strncmp(url, prefix, strlen(prefix)) != 0)
+        return false;
+        
     struct addrinfo hints, *servinfo;
-
+    char domain[255];
+        
+    char *request = strchr(url + strlen(prefix) + 1, '/');
+    int len = request - url - strlen(prefix);
+    strncpy (domain, url + strlen(prefix), len);
+    domain[len]='\0';
+    
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC; // use AF_INET6 to force IPv6
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo("ssl.gstatic.com", "http", &hints, &servinfo) != 0) {
+    if (getaddrinfo(domain, "http", &hints, &servinfo) != 0) {
         return false;
     }
 
@@ -108,19 +117,40 @@ bool download (char *word, char *filename) {
         if (connect(socket_desc, (struct sockaddr *)servinfo->ai_addr, servinfo->ai_addrlen) == 0) {
             //Send request
             char message[255];
-            sprintf(message, "GET /dictionary/static/sounds/oxford/%s--_us_1.mp3 HTTP/1.1\r\nHost: ssl.gstatic.com\r\nConnection: close\r\n\r\n", word);
+            sprintf(message, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", request, domain);
             if (send(socket_desc, message, strlen(message), 0) > 0) {
                 FILE *file = fopen(filename, "w");
                 if (file) {
-                    char server_reply[10000];
-                    while(1) {
-                        int len = recv(socket_desc, server_reply, sizeof(server_reply), 0);
-                        if (len <= 0 )
-                            break;
-                        fwrite(server_reply, len, 1, file);
-                        total_len += len;
+                    bool error = true;
+                    int   max_len = 1024 * 1024;  //1mb
+                    char *reply=malloc(max_len);
+                    //http response header
+                    int len = recv(socket_desc, reply, max_len, 0);
+                    if (len > 0) {
+                        if (strstr(reply, "HTTP/1.1 200 OK") == reply) {
+                            char *ptr = strstr (reply, "\r\n\r\n");
+                            if (ptr) {
+                                ptr += 4;
+                                len -= ptr - reply;
+                                fwrite(ptr, len, 1, file);
+                                total_len += len;
+
+                                error = false;
+                            }
+                        }
                     }
+                    if (error == false) {
+                        len = recv(socket_desc, reply, max_len, 0);
+                        while (len > 0) {
+                            fwrite(reply, len, 1, file);
+                            total_len += len;
+                            len = recv(socket_desc, reply, max_len, 0);
+                        }
+                    }
+                    free(reply);
                     fclose(file);
+                    if (error)
+                        remove(filename);
                 }
             }
         }
@@ -215,10 +245,24 @@ int loadV11 (FILE *fp, Word* list) {
         list[wordcount].grade = 0;
         list[wordcount].seq   = wordcount;
         
+        //word
         strcpy (list[wordcount].word, buff);
+        //category
+        fgets(buff, sizeof(buff), fp);
+        trim(buff);
+        strcpy (list[wordcount].class, buff);
+        //definition
         fgets(buff, sizeof(buff), fp);
         trim(buff);
         strcpy (list[wordcount].def, buff);
+        //example
+        fgets(buff, sizeof(buff), fp);
+        trim(buff);
+        strcpy (list[wordcount].sample, buff);
+        //audio
+        fgets(buff, sizeof(buff), fp);
+        trim(buff);
+        strcpy (list[wordcount].audio, buff);
         //skip blank line
         fgets(buff, sizeof(buff), fp);
 
@@ -257,61 +301,6 @@ int load (char* filename, Word* list) {
 
     return wordcount;
 }
-/* speech.sh
----------------------------------------------------------------------------------------------------------------------------------
-#!/bin/bash
-say() { local IFS=+;/usr/bin/omxplayer >/dev/null "http://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&q=$*&tl=en"; }
-say $*
----------------------------------------------------------------------------------------------------------------------------------
-./speech.sh The jacket is red
-pico2wave -w sentence.wav "The jacket is red" && omxplayer sentence.wav >/dev/null
-*/
-void read(char *sentence) {
-    if (strlen(sentence) <= 0)
-        return;
-
-    char command[DEFLEN + SAMPLELEN];
-    sprintf(command, "./speech.sh \"%s\"", sentence);
-    system(command );
-}
-
-void read2(char *sentence) {
-    if (strlen(sentence) <= 0)
-        return;
-
-    char command[DEFLEN + SAMPLELEN];
-    sprintf(command, "pico2wave -w sentence.wav \"%s\" && omxplayer sentence.wav >/dev/null", sentence);
-    system(command );
-}
-
-void read_word(char *word) {
-    if (strlen(word) <= 0)
-        return;
-    char voice[255];
-    sprintf(voice, "voice/%s.mp3", word);
-
-    bool mp3_available = false;
-
-    FILE *file = fopen (voice, "r");
-    if (file == NULL) {
-        if (download(word, voice)) {
-            mp3_available = true;
-        }
-    }
-    else {
-        fclose (file);
-        mp3_available = true;
-    }
-
-    if (mp3_available) {
-        play(voice);
-    }
-    else {
-        char command[255];
-        sprintf(command, "omxplayer http://ssl.gstatic.com/dictionary/static/sounds/oxford/%s--_us_1.mp3 >/dev/null", word);
-        system(command );
-    }
-}
 
 int play( char *audio_file) {
     char command[256];
@@ -325,13 +314,77 @@ int play( char *audio_file) {
     return status;
 }
 
+/* speech.sh
+---------------------------------------------------------------------------------------------------------------------------------
+#!/bin/bash
+say() { local IFS=+;/usr/bin/omxplayer >/dev/null "http://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&q=$*&tl=en"; }
+say $*
+---------------------------------------------------------------------------------------------------------------------------------
+./speech.sh The jacket is red
+pico2wave -w sentence.wav "The jacket is red" && omxplayer sentence.wav >/dev/null
+*/
+void read_sentence_online(char *sentence) {
+    if (strlen(sentence) <= 0)
+        return;
+
+    char command[DEFLEN + SAMPLELEN];
+    sprintf(command, "./speech.sh \"%s\"", sentence);
+    system(command );
+}
+
+void read_sentence_offline(char *sentence) {
+    if (strlen(sentence) <= 0)
+        return;
+
+    char command[DEFLEN + SAMPLELEN];
+    sprintf(command, "pico2wave -w sentence.wav \"%s\" && omxplayer sentence.wav >/dev/null", sentence);
+    system(command );
+}
+//http://ssl.gstatic.com/dictionary/static/sounds/oxford/persistent--_us_1.mp3
+void read_word(char *word, char *mp3_url) {
+    if (strlen(word) <= 0)
+        return;
+        
+    char url[255];
+    if (mp3_url)
+        strcpy (url, mp3_url);
+    else {
+        sprintf(url, "http://ssl.gstatic.com/dictionary/static/sounds/oxford/%s--_us_1.mp3", word);
+    }
+    //cached voice file name (mp3)    
+    char voice[255];
+    sprintf(voice, "voice/%s.mp3", word);
+
+    bool mp3_available = false;
+
+    FILE *file = fopen (voice, "r");
+    if (file == NULL) {
+        if (download_url(url, voice)) {
+            mp3_available = true;
+        }
+    }
+    else {
+        fclose (file);
+        mp3_available = true;
+    }
+
+    if (mp3_available) {
+        play(voice);
+    }
+    else {
+        //play mp3 online
+        char command[255];
+        sprintf(command, "omxplayer %s >/dev/null", url);
+        system(command );
+    }
+}
 
 int main(int argc, char *argv[])
 {
     Stats info;
     char more;
     char buff[255];
-    char buff2[255];
+    char stats_filename[255];
     char filename[255];
     int wordnum;
     int selected_grade;
@@ -387,33 +440,37 @@ int main(int argc, char *argv[])
 
     more = 'h';
     int select = 0;
-    read("enter username");
+    read_sentence_online("enter username");
     printf("enter username: ");
-    scanf("%s", buff2);
-    strcat(buff2, ".txt");
+    scanf("%s", stats_filename);
+    strcat(stats_filename, ".txt");
     memset(&info, 0, sizeof(info));
-    loadstats(&info, buff2);
+    loadstats(&info, stats_filename);
     while (more != 'q' && select++ < selected_total) {
         wordnum = index[select];
         ++info.asked;
         bool donotcount = false;
         for (;;) {
             fseek(stdin,0,SEEK_END);
-            read_word(list[wordnum].word);
+            read_word(list[wordnum].word, NULL);
             printf("[%d:%03d]Enter the word spelling: ", list[wordnum].grade, select);
             scanf("%s", buff );
             if (strcmp(buff, "c")==0) {
-                read(list[wordnum].class);
+                read_sentence_online(list[wordnum].class);
                 info.help++;
             }
-            else if (strcmp(buff, "d")==0)
-            {
-                read(list[wordnum].def);
+            else if (strcmp(buff, "d")==0) {
+                read_sentence_online(list[wordnum].def);
                 info.help++;
             }
 
             else if (strcmp(buff, "r")==0) {
-                read_word(list[wordnum].word);
+                if (strlen (list[wordnum].audio) > 0) {
+                    read_word(list[wordnum].word, list[wordnum].audio);
+                }
+                else {
+                    read_sentence_offline(list[wordnum].word);
+                }
             }
             else if (strcmp(buff, "?")==0) {
                 printf("%s\n", list[wordnum].word);
@@ -427,7 +484,7 @@ int main(int argc, char *argv[])
                 break;
             }
             else if (strcmp(buff, "clear")==0) {
-                remove(STATSFILE);
+                remove(stats_filename);
                 memset(&info, 0, sizeof(info));
                 info.asked++;
             }
@@ -437,7 +494,7 @@ int main(int argc, char *argv[])
                     play("perfect.wav");
                 }
                 else {
-                    read("you finally passed the question! Yay!");
+                    read_sentence_online("you finally passed the question! Yay!");
                 }
                 break;
             }
@@ -448,7 +505,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    savestats(&info, buff2);
+    savestats(&info, stats_filename);
     play("bye.wav");
     free (list);
     info.possiblehelp=(float)info.asked*2;
