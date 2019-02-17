@@ -30,16 +30,12 @@ void trim(char *str) {
 /*---------------------------------------------------------------------*/
 /*--- InitCTX - initialize the SSL engine.                          ---*/
 /*---------------------------------------------------------------------*/
-SSL_CTX* InitCTX(void)
-{   SSL_METHOD *method;
-    SSL_CTX *ctx;
-
+SSL_CTX* InitCTX(void) {
     OpenSSL_add_all_algorithms();       /* Load cryptos, et.al. */
     SSL_load_error_strings();           /* Bring in and register error messages */
-    method = TLSv1_2_client_method();       /* Create new client-method instance */
-    ctx = SSL_CTX_new(method);          /* Create new context */
-    if ( ctx == NULL )
-    {
+    const SSL_METHOD *method = TLS_client_method();       /* Create new client-method instance */
+    SSL_CTX *ctx = SSL_CTX_new(method);          /* Create new context */
+    if ( ctx == NULL ) {
         ERR_print_errors_fp(stderr);
         abort();
     }
@@ -107,6 +103,9 @@ int call (char *word, char *definitions) {
                     strcat (server_reply, buffer);
                     total_len += len;
                 }
+                if (strstr(server_reply, "Authentication failed")) {
+                    printf("*****Authentication failed\n");
+                }
                 char *ptr = strstr(server_reply, szTag);
                 if (ptr) {
                     ptr += strlen (szTag);
@@ -127,7 +126,7 @@ int call (char *word, char *definitions) {
     return total_len > 0 ? true : false;
 }
 
-//gcc init.c -L/usr/lib -lssl -lcrypto
+//gcc -o init init.c -L/usr/lib -lssl -lcrypto
 int main(int argc, char *argv[])
 {
     char filename[255];
@@ -135,18 +134,30 @@ int main(int argc, char *argv[])
     char definitions[2048];
     char buff[255];
     char *version="#Ver1.1\r\n";
+    bool done = false;
 
     load_credentials();
 
     strcpy (filename, "dict/Asian.txt");
     strcpy (output, "dict/SpellingBeeAsian.txt");
     if (argc > 1) {
-        strcpy (filename, "dict/");
-        strcat (filename, argv[1]);
-        
-        strcpy (output, "dict/SpellingBee");
-        strcat (output, argv[1]);
+        if (strcmp(argv[1], "--test") == 0) {
+            strcpy (buff, "shampoo");
+            call(buff, definitions);
+            printf("%s:%s\n", buff, definitions);
+
+            done = true;
+        }
+        else {
+            strcpy (filename, "dict/");
+            strcat (filename, argv[1]);
+            
+            strcpy (output, "dict/SpellingBee");
+            strcat (output, argv[1]);
+        }
     }
+    if (done)
+        return 0;
     
     char *str;
     FILE *fp = fopen(filename, "r");
@@ -169,7 +180,8 @@ int main(int argc, char *argv[])
         fwrite ("\r\n", 2, 1, fpOutput);
         fwrite (definitions, strlen(definitions), 1, fpOutput);
         fwrite ("\r\n\r\n", 4, 1, fpOutput);
-        
+        //60 calls per minute
+        usleep(1500 * 1000);
         str = fgets(buff, sizeof(buff), fp);
     }
     fclose(fp);

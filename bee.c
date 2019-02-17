@@ -33,6 +33,7 @@ typedef struct tagStats
     int asked;
     int correct;
     int help;
+    float possiblehelp;
 
 } Stats;
 
@@ -222,7 +223,6 @@ int loadV11 (FILE *fp, Word* list) {
         fgets(buff, sizeof(buff), fp);
 
         str = fgets(buff, sizeof(buff), fp);
-        trim(buff);
     }
 
     return wordcount;
@@ -429,7 +429,7 @@ int main(int argc, char *argv[])
             else if (strcmp(buff, "clear")==0) {
                 remove(STATSFILE);
                 memset(&info, 0, sizeof(info));
-                ++info.asked;
+                info.asked++;
             }
             else if (strcmp(list[wordnum].word, buff)==0) {
                 if (!donotcount) {
@@ -451,8 +451,9 @@ int main(int argc, char *argv[])
     savestats(&info, buff2);
     play("bye.wav");
     free (list);
+    info.possiblehelp=(float)info.asked*2;
     printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
-    printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.asked*2*100);
+    printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.possiblehelp*100);
     
     return 0;
 }
