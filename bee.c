@@ -10,13 +10,15 @@
 #define CLASSLEN      15
 #define DEFLEN        255
 #define SAMPLELEN     255
-#define AUDIOLEN     255
+#define AUDIOLEN      255
 #define LISTLEN       1000
 
+#define DICT_VER_BASIC      0
 
 #define bool        int
 #define true        1
 #define false       0
+
 
 typedef struct tagWord
 {
@@ -35,7 +37,7 @@ typedef struct tagStats
     int correct;
     int help;
     float possiblehelp;
-
+    int progress [255];
 } Stats;
 
 int loadstats(Stats *info, char *filename) {
@@ -93,15 +95,15 @@ bool download_url (char *url, char *filename) {
     char *prefix="http://";
     if (strncmp(url, prefix, strlen(prefix)) != 0)
         return false;
-        
+
     struct addrinfo hints, *servinfo;
     char domain[255];
-        
+
     char *request = strchr(url + strlen(prefix) + 1, '/');
     int len = request - url - strlen(prefix);
     strncpy (domain, url + strlen(prefix), len);
     domain[len]='\0';
-    
+
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC; // use AF_INET6 to force IPv6
     hints.ai_socktype = SOCK_STREAM;
@@ -244,7 +246,7 @@ int loadV11 (FILE *fp, Word* list) {
         ++wordcount;
         list[wordcount].grade = 0;
         list[wordcount].seq   = wordcount;
-        
+
         //word
         strcpy (list[wordcount].word, buff);
         //category
@@ -275,7 +277,7 @@ int loadV11 (FILE *fp, Word* list) {
 
 //load word list from given file
 //@return total number of words loaded
-int load (char* filename, Word* list) {
+int load (char* filename, Word* list, int *ver) {
     char *str, buff[1000];
     int wordcount = 0;
 
@@ -289,9 +291,11 @@ int load (char* filename, Word* list) {
         trim(buff);
         if (strcmp (buff, "#Ver1.0") == 0) {
             wordcount = loadV10(fp, list);
+            *ver = DICT_VER_BASIC;
         }
         else if (strcmp (buff, "#Ver1.1") == 0) {
             wordcount = loadV11(fp, list);
+            *ver = DICT_VER_BASIC + 1;
         }
         else {
             printf("Not supported file format\n");
@@ -344,14 +348,14 @@ void read_sentence_offline(char *sentence) {
 void read_word(char *word, char *mp3_url) {
     if (strlen(word) <= 0)
         return;
-        
+
     char url[255];
     if (mp3_url)
         strcpy (url, mp3_url);
     else {
         sprintf(url, "http://ssl.gstatic.com/dictionary/static/sounds/oxford/%s--_us_1.mp3", word);
     }
-    //cached voice file name (mp3)    
+    //cached voice file name (mp3)
     char voice[255];
     sprintf(voice, "voice/%s.mp3", word);
 
@@ -379,8 +383,19 @@ void read_word(char *word, char *mp3_url) {
     }
 }
 
+int name_to_grade(char *filename) {
+    int grade = 0, base = 100, max = 255;
+    for (int i = 0; i < strlen(filename); ++i) {
+        grade += filename[i];
+    }
+    grade = base + (grade % (max - base));
+    
+    return grade;
+}
+
 int main(int argc, char *argv[])
 {
+
     Stats info;
     char more;
     char buff[255];
@@ -388,36 +403,51 @@ int main(int argc, char *argv[])
     char filename[255];
     int wordnum;
     int selected_grade;
+    int dict_ver;
     Word *list;
     int  index[LISTLEN];
     //dictionary file path
     char dict[255];
-    
+    bool quiz_mode;
+
+
+    quiz_mode=false;
     //default dictionary
     strcpy(dict, "dict/SpellingBee2018.txt");
     selected_grade = 3;
+
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--help")==0) {
             //print help menu
             printf("%s --gradeN dictionary_file_name\n", argv[0]);
             return 0;
         }
+
         else if (strncmp(argv[i], "--grade", 7) == 0) {
             selected_grade = argv[i][7]-'0';
+
+        }
+        else if (strcmp (argv[i], "--quiz") == 0) {
+            quiz_mode = true;
         }
         else {
             strcpy (dict, "dict/");
             strcat (dict, argv[i]);
         }
     }
-    if (selected_grade < 1 || selected_grade > 8)
-        selected_grade = 5;
     list = calloc(LISTLEN, sizeof (Word));
-    int total = load (dict, list);
+    int total = load (dict, list, &dict_ver);
     printf("Total %d words in %s\n", total, dict);
     if (total <= 0) {
         free (list);
         return 1;
+    }
+    if (dict_ver == DICT_VER_BASIC) {//SpellingBee2018.txt loaded
+        if (selected_grade < 0 || selected_grade > 8)
+            selected_grade = 3;
+    }
+    else {
+        selected_grade = name_to_grade(dict);
     }
     printf("c-class,d-definition,r-read again,q-quit, clear-clear progress\n");
     printf("--------------------------------------------------------------\n");
@@ -430,22 +460,35 @@ int main(int argc, char *argv[])
             index[selected_total++]=i;
         }
     }
-    for (int i = 0; i < selected_total; ++i) {
-        int sel1 = rand() % selected_total;
-        int sel2 = rand() % selected_total;
-        int tmp = index[sel1];
-        index[sel1]=index[sel2];
-        index[sel2]=tmp;
+
+    if (quiz_mode == true) {
+        for (int i = 0; i < selected_total; ++i) {
+            int sel1 = rand() % selected_total;
+            int sel2 = rand() % selected_total;
+            int tmp = index[sel1];
+            index[sel1]=index[sel2];
+            index[sel2]=tmp;
+        }
     }
 
     more = 'h';
-    int select = 0;
     read_sentence_online("enter username");
-    printf("enter username: ");
-    scanf("%s", stats_filename);
+    printf("Enter username: ");
+
+    fgets(stats_filename, sizeof(stats_filename) - 4, stdin);
+    trim(stats_filename);
+    if (strlen(stats_filename) <= 0) {
+        strcpy(stats_filename, "anonymous.txt");
+    }
     strcat(stats_filename, ".txt");
     memset(&info, 0, sizeof(info));
     loadstats(&info, stats_filename);
+
+
+    int select = info.progress[selected_grade];
+    if (select < 0 || select >= selected_total)
+        select = 0;
+
     while (more != 'q' && select++ < selected_total) {
         wordnum = index[select];
         ++info.asked;
@@ -453,8 +496,10 @@ int main(int argc, char *argv[])
         for (;;) {
             fseek(stdin,0,SEEK_END);
             read_word(list[wordnum].word, NULL);
-            printf("[%d:%03d]Enter the word spelling: ", list[wordnum].grade, select);
-            scanf("%s", buff );
+            int word_grade = dict_ver == DICT_VER_BASIC ? list[wordnum].grade : selected_grade;
+            printf("[%d:%03d]Enter the word spelling: ", word_grade, select);
+            fgets(buff, sizeof(buff), stdin);
+            trim(buff);
             if (strcmp(buff, "c")==0) {
                 read_sentence_online(list[wordnum].class);
                 info.help++;
@@ -504,13 +549,14 @@ int main(int argc, char *argv[])
             }
         }
     }
-
+    
+    info.progress[selected_grade]=select;
     savestats(&info, stats_filename);
     play("bye.wav");
     free (list);
     info.possiblehelp=(float)info.asked*2;
     printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
     printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.possiblehelp*100);
-    
+
     return 0;
 }
