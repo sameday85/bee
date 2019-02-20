@@ -14,6 +14,7 @@
 #define LISTLEN       1000
 
 #define DICT_VER_BASIC      0
+#define GRADE_CEILING       255
 
 #define bool        int
 #define true        1
@@ -36,9 +37,11 @@ typedef struct tagStats
     int asked;
     int correct;
     int help;
-    float possiblehelp;
-    int progress [255];
+    int progress [GRADE_CEILING];
+
 } Stats;
+
+
 
 int loadstats(Stats *info, char *filename) {
     FILE *fp;
@@ -384,23 +387,24 @@ void read_word(char *word, char *mp3_url) {
 }
 
 int name_to_grade(char *filename) {
-    int grade = 0, base = 100, max = 255;
+    int grade = 0, base = 10, max = GRADE_CEILING;
     for (int i = 0; i < strlen(filename); ++i) {
         grade += filename[i];
     }
     grade = base + (grade % (max - base));
-    
+
     return grade;
 }
+
 
 int main(int argc, char *argv[])
 {
 
     Stats info;
+    Stats currentinfo;
     char more;
     char buff[255];
     char stats_filename[255];
-    char filename[255];
     int wordnum;
     int selected_grade;
     int dict_ver;
@@ -453,8 +457,6 @@ int main(int argc, char *argv[])
     printf("--------------------------------------------------------------\n");
 
     int selected_total = 0;
-    //initalize the random number generator
-    srand(time(0));
     for (int i = 0; i < total; ++i) {
         if (selected_grade == 0 || list[i].grade == 0 || list[i].grade == selected_grade) {
             index[selected_total++]=i;
@@ -462,6 +464,8 @@ int main(int argc, char *argv[])
     }
 
     if (quiz_mode == true) {
+        //initalize the random number generator
+        srand(time(0));
         for (int i = 0; i < selected_total; ++i) {
             int sel1 = rand() % selected_total;
             int sel2 = rand() % selected_total;
@@ -478,20 +482,20 @@ int main(int argc, char *argv[])
     fgets(stats_filename, sizeof(stats_filename) - 4, stdin);
     trim(stats_filename);
     if (strlen(stats_filename) <= 0) {
-        strcpy(stats_filename, "anonymous.txt");
+        strcpy(stats_filename, "guest");
     }
     strcat(stats_filename, ".txt");
     memset(&info, 0, sizeof(info));
+    memset(&currentinfo, 0, sizeof(currentinfo));
     loadstats(&info, stats_filename);
 
 
     int select = info.progress[selected_grade];
     if (select < 0 || select >= selected_total)
-        select = 0;
-
+  
     while (more != 'q' && select++ < selected_total) {
         wordnum = index[select];
-        ++info.asked;
+        ++currentinfo.asked;
         bool donotcount = false;
         for (;;) {
             fseek(stdin,0,SEEK_END);
@@ -502,13 +506,12 @@ int main(int argc, char *argv[])
             trim(buff);
             if (strcmp(buff, "c")==0) {
                 read_sentence_online(list[wordnum].class);
-                info.help++;
+                currentinfo.help++;
             }
             else if (strcmp(buff, "d")==0) {
                 read_sentence_online(list[wordnum].def);
-                info.help++;
+                currentinfo.help++;
             }
-
             else if (strcmp(buff, "r")==0) {
                 if (strlen (list[wordnum].audio) > 0) {
                     read_word(list[wordnum].word, list[wordnum].audio);
@@ -525,17 +528,17 @@ int main(int argc, char *argv[])
             else if (strcmp(buff, "q")==0) {
                 more = 'q';
                 donotcount=true;
-                --info.asked;
+                --currentinfo.asked;
                 break;
             }
             else if (strcmp(buff, "clear")==0) {
                 remove(stats_filename);
                 memset(&info, 0, sizeof(info));
-                info.asked++;
+                currentinfo.asked++;
             }
             else if (strcmp(list[wordnum].word, buff)==0) {
                 if (!donotcount) {
-                    info.correct++;
+                    currentinfo.correct++;
                     play("perfect.wav");
                 }
                 else {
@@ -549,14 +552,19 @@ int main(int argc, char *argv[])
             }
         }
     }
+    info.asked += currentinfo.asked;
+    info.correct += currentinfo.correct;
+    info.help += currentinfo.help;
     
-    info.progress[selected_grade]=select;
+    info.progress[selected_grade] = select - 1;
     savestats(&info, stats_filename);
-    play("bye.wav");
     free (list);
-    info.possiblehelp=(float)info.asked*2;
+    play("bye.wav");
+
+    printf("your correct percentage or ratio was %d out of %d or %.3f%% today\n", currentinfo.correct, currentinfo.asked, (float)currentinfo.correct/currentinfo.asked*100);
+    printf("you asked for help %d times out of %d possible times today. %f%% is your percentage for asking for help today\n", currentinfo.help, currentinfo.asked*2, (float)currentinfo.help/currentinfo.asked * 2 *100);
     printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
-    printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.possiblehelp*100);
+    printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.asked * 2*100);
 
     return 0;
 }
