@@ -16,9 +16,17 @@
 #define DICT_VER_BASIC      0
 #define GRADE_CEILING       255
 
+#define PRACTICE            0
+#define QUIZ                1
+#define PLACE               2
+
+#define RC_UNKNOWN          0
+#define RC_FINIAHED_ALL     1
+#define RC_QUIT             2
+
 #define bool        int
-#define true        1
-#define false       0
+#define false        0 //must be zero
+#define true         1
 
 
 typedef struct tagWord
@@ -38,10 +46,18 @@ typedef struct tagStats
     int correct;
     int help;
     int progress [GRADE_CEILING];
-
+    int suggest;
 } Stats;
 
-
+typedef struct tagContext {
+    Word *list;
+    int  *index;
+    int  total;
+    int  selected;
+    int  selected_total;
+    int  max_words;
+    int  suggested_grade;
+} Context;
 
 int loadstats(Stats *info, char *filename) {
     FILE *fp;
@@ -351,7 +367,6 @@ void read_sentence_offline(char *sentence) {
 void read_word(char *word, char *mp3_url) {
     if (strlen(word) <= 0)
         return;
-
     char url[255];
     if (mp3_url)
         strcpy (url, mp3_url);
@@ -392,34 +407,125 @@ int name_to_grade(char *filename) {
         grade += filename[i];
     }
     grade = base + (grade % (max - base));
-
     return grade;
 }
 
+int present(Context *context, Stats *currentinfo) {
+    char buff[255];
+    bool more = true;
+    
+    int ret = RC_FINIAHED_ALL;
+    while (more && context->selected < context->selected_total) {
+        int wordnum = context->index[context->selected++];
+        ++currentinfo->asked;
+        bool failed_already = false;
+        for (;;) {
+            fseek(stdin,0,SEEK_END);
+            read_word(context->list[wordnum].word, NULL);
+            printf("[%d:%03d]Enter the word spelling: ", context->list[wordnum].grade, context->selected);
+            fgets(buff, sizeof(buff), stdin);
+            trim(buff);
+            if (strcmp(buff, "c")==0) {
+                read_sentence_online(context->list[wordnum].class);
+                currentinfo->help++;
+            }
+            else if (strcmp(buff, "d")==0) {
+                read_sentence_online(context->list[wordnum].def);
+                currentinfo->help++;
+            }
+            else if (strcmp(buff, "r")==0) {
+                if (strlen (context->list[wordnum].audio) > 0) {
+                    read_word(context->list[wordnum].word, context->list[wordnum].audio);
+                }
+                else {
+                    read_sentence_offline(context->list[wordnum].word);
+                }
+            }
+            else if (strcmp(buff, "?")==0) {
+                printf("%s\n", context->list[wordnum].word);
+                failed_already=true;
+                break;
+            }
+            else if (strcmp(buff, "q")==0) {
+                more = false;
+                failed_already=true;
+                --currentinfo->asked;
+                ret = RC_QUIT;
+                break;
+            }
+            else if (strcmp(context->list[wordnum].word, buff)==0) {
+                if (!failed_already) {
+                    currentinfo->correct++;
+                    play("perfect.wav");
+                }
+                else {
+                    read_sentence_online("you finally passed the question! Yay!");
+                }
+                break;
+            }
+            else {
+                failed_already=true;
+                play("sorry.wav");
+            }
+        }
+    }
+    return ret;
+}
+
+int do_practice (Context *context, int selected_grade, Stats *currentinfo) {
+    for (int i = 0; i < context->total; ++i) {
+        if ((selected_grade == 0) || context->list[i].grade == 0 || (context->list[i].grade == selected_grade)) {
+            context->index[context->selected_total++]=i;
+        }
+    }
+    if (context->selected < 0 || context->selected >= context->selected_total)
+        context->selected = 0;
+    return present (context, currentinfo);
+}
+
+int do_quiz(Context *context, int selected_grade, Stats *currentinfo) {
+    context->selected = 0;
+    for (int i = 0; i < context->total; ++i) {
+        if ((selected_grade == 0) || context->list[i].grade == 0 || (context->list[i].grade == selected_grade)) {
+            context->index[context->selected_total++]=i;
+        }
+    }
+    srand(time(0));
+    for (int i = 0; i < context->selected_total; ++i) {
+        int sel1 = rand() % context->selected_total;
+        int sel2 = rand() % context->selected_total;
+        int tmp = context->index[sel1];
+        context->index[sel1]=context->index[sel2];
+        context->index[sel2]=tmp;
+    }   
+    if (context->max_words > 0 && context->max_words < context->selected_total)
+        context->selected_total = context->max_words;
+
+    return present (context, currentinfo);
+}
+
+int do_placement(Context *context, Stats *currentinfo) {
+    //printf("your passed grade %d. Now we will test you  grade %d words\n", limit, limit+1);
+    //printf("your suggested grade level is %d\n", limit);
+    return -1;
+}
 
 int main(int argc, char *argv[])
 {
-
-    Stats info;
-    Stats currentinfo;
-    char more;
+    Context context;
+    Stats info, currentinfo;
+    char dict_filename[255], stats_filename[255];
     char buff[255];
-    char stats_filename[255];
-    int wordnum;
     int selected_grade;
     int dict_ver;
-    Word *list;
-    int  index[LISTLEN];
-    //dictionary file path
-    char dict[255];
-    bool quiz_mode;
-
-
-    quiz_mode=false;
+    int mode;
+ 
+    memset (&context, 0, sizeof (context));
     //default dictionary
-    strcpy(dict, "dict/SpellingBee2018.txt");
+    strcpy(dict_filename, "dict/SpellingBee2018.txt");
     selected_grade = 3;
 
+    mode = PRACTICE;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--help")==0) {
             //print help menu
@@ -432,139 +538,91 @@ int main(int argc, char *argv[])
 
         }
         else if (strcmp (argv[i], "--quiz") == 0) {
-            quiz_mode = true;
+            mode = QUIZ;
+        }
+        else if (strcmp (argv[i], "--place")==0) {
+            mode = PLACE;
         }
         else {
-            strcpy (dict, "dict/");
-            strcat (dict, argv[i]);
+            strcpy (dict_filename, "dict/");
+            strcat (dict_filename, argv[i]);
         }
     }
-    list = calloc(LISTLEN, sizeof (Word));
-    int total = load (dict, list, &dict_ver);
-    printf("Total %d words in %s\n", total, dict);
-    if (total <= 0) {
-        free (list);
+    if (mode == PLACE) {
+        strcpy(dict_filename, "dict/SpellingBee2018.txt");
+    }
+    context.list = calloc(LISTLEN, sizeof (Word));
+    context.total= load (dict_filename, context.list, &dict_ver);
+    printf("Total %d words in %s\n", context.total, dict_filename);
+    if (context.total <= 0) {
+        free (context.list);
         return 1;
     }
+    context.index= calloc(context.total, sizeof (int));
     if (dict_ver == DICT_VER_BASIC) {//SpellingBee2018.txt loaded
         if (selected_grade < 0 || selected_grade > 8)
             selected_grade = 3;
     }
     else {
-        selected_grade = name_to_grade(dict);
+        selected_grade = name_to_grade(dict_filename);
+        for (int i = 0; i < context.total; ++i)
+            context.list[i].grade = selected_grade;
     }
     printf("c-class,d-definition,r-read again,q-quit, clear-clear progress\n");
     printf("--------------------------------------------------------------\n");
 
-    int selected_total = 0;
-    for (int i = 0; i < total; ++i) {
-        if (selected_grade == 0 || list[i].grade == 0 || list[i].grade == selected_grade) {
-            index[selected_total++]=i;
-        }
-    }
-
-    if (quiz_mode == true) {
-        //initalize the random number generator
-        srand(time(0));
-        for (int i = 0; i < selected_total; ++i) {
-            int sel1 = rand() % selected_total;
-            int sel2 = rand() % selected_total;
-            int tmp = index[sel1];
-            index[sel1]=index[sel2];
-            index[sel2]=tmp;
-        }
-    }
-
-    more = 'h';
     read_sentence_online("enter username");
     printf("Enter username: ");
-
-    fgets(stats_filename, sizeof(stats_filename) - 4, stdin);
+    fgets(stats_filename, 20, stdin);
     trim(stats_filename);
     if (strlen(stats_filename) <= 0) {
         strcpy(stats_filename, "guest");
     }
     strcat(stats_filename, ".txt");
     memset(&info, 0, sizeof(info));
-    memset(&currentinfo, 0, sizeof(currentinfo));
     loadstats(&info, stats_filename);
-
-
-    int select = info.progress[selected_grade];
-    if (select < 0 || select >= selected_total)
-  
-    while (more != 'q' && select++ < selected_total) {
-        wordnum = index[select];
-        ++currentinfo.asked;
-        bool donotcount = false;
-        for (;;) {
-            fseek(stdin,0,SEEK_END);
-            read_word(list[wordnum].word, NULL);
-            int word_grade = dict_ver == DICT_VER_BASIC ? list[wordnum].grade : selected_grade;
-            printf("[%d:%03d]Enter the word spelling: ", word_grade, select);
-            fgets(buff, sizeof(buff), stdin);
-            trim(buff);
-            if (strcmp(buff, "c")==0) {
-                read_sentence_online(list[wordnum].class);
-                currentinfo.help++;
-            }
-            else if (strcmp(buff, "d")==0) {
-                read_sentence_online(list[wordnum].def);
-                currentinfo.help++;
-            }
-            else if (strcmp(buff, "r")==0) {
-                if (strlen (list[wordnum].audio) > 0) {
-                    read_word(list[wordnum].word, list[wordnum].audio);
-                }
-                else {
-                    read_sentence_offline(list[wordnum].word);
-                }
-            }
-            else if (strcmp(buff, "?")==0) {
-                printf("%s\n", list[wordnum].word);
-                donotcount=true;
-                break;
-            }
-            else if (strcmp(buff, "q")==0) {
-                more = 'q';
-                donotcount=true;
-                --currentinfo.asked;
-                break;
-            }
-            else if (strcmp(buff, "clear")==0) {
-                remove(stats_filename);
-                memset(&info, 0, sizeof(info));
-                currentinfo.asked++;
-            }
-            else if (strcmp(list[wordnum].word, buff)==0) {
-                if (!donotcount) {
-                    currentinfo.correct++;
-                    play("perfect.wav");
-                }
-                else {
-                    read_sentence_online("you finally passed the question! Yay!");
-                }
-                break;
-            }
-            else {
-                donotcount=true;
-                play("sorry.wav");
-            }
-        }
-    }
-    info.asked += currentinfo.asked;
-    info.correct += currentinfo.correct;
-    info.help += currentinfo.help;
+    context.selected = info.progress[selected_grade];
     
-    info.progress[selected_grade] = select - 1;
+    memset(&currentinfo, 0, sizeof(currentinfo));
+    int ret = RC_UNKNOWN;
+    switch (mode) {
+        case PRACTICE:
+        ret = do_practice(&context, selected_grade, &currentinfo);
+        break;
+        case QUIZ:
+        ret = do_quiz(&context, selected_grade, &currentinfo);
+        break;
+        case PLACE:
+        ret = do_placement(&context, &currentinfo);
+        break;
+    }
+    free (context.list);
+    free (context.index);
+
+    info.asked  += currentinfo.asked;
+    info.correct+= currentinfo.correct;
+    info.help   += currentinfo.help;
+    if (mode == PRACTICE) {
+        info.progress[selected_grade] = context.selected - 1;
+    }
     savestats(&info, stats_filename);
-    free (list);
     play("bye.wav");
 
-    printf("your correct percentage or ratio was %d out of %d or %.3f%% today\n", currentinfo.correct, currentinfo.asked, (float)currentinfo.correct/currentinfo.asked*100);
-    printf("you asked for help %d times out of %d possible times today. %f%% is your percentage for asking for help today\n", currentinfo.help, currentinfo.asked*2, (float)currentinfo.help/currentinfo.asked * 2 *100);
-    printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
-    printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.asked * 2*100);
+    switch (mode) {
+        case PRACTICE:
+        case QUIZ:
+        printf("your correct percentage or ratio was %d out of %d or %.3f%% today\n", currentinfo.correct, currentinfo.asked, (float)currentinfo.correct/currentinfo.asked*100);
+        printf("you asked for help %d times out of %d possible times today. %f%% is your percentage for asking for help today\n", currentinfo.help, currentinfo.asked*2, (float)currentinfo.help/currentinfo.asked * 2 *100);
+        printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
+        printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.asked * 2*100);
+        break;
+        case PLACE:
+        if (ret == RC_FINIAHED_ALL) {
+            printf("your suggested grade level is %d\n", context.suggested_grade);
+        }
+        break;
+    }
 
     return 0;
 }
+    
