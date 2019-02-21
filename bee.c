@@ -461,7 +461,7 @@ int present(Context *context, Stats *currentinfo) {
                     play("perfect.wav");
                 }
                 else {
-                    read_sentence_online("you finally passed the question! Yay!");
+                    play("pass.mp3");
                 }
                 break;
             }
@@ -550,10 +550,6 @@ int main(int argc, char *argv[])
     mode = PRACTICE;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--help")==0) {
-            //print help menuprintf("your correct percentage or ratio was %d out of %d or %.3f%% today\n", currentinfo.correct, currentinfo.asked, (float)currentinfo.correct/currentinfo.asked*100);
-            printf("you asked for help %d times out of %d possible times today. %f%% is your percentage for asking for help today\n", currentinfo.help, currentinfo.asked*2, (float)currentinfo.help/currentinfo.asked * 2 *100);
-            printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
-            printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.asked * 2*100);
             printf("%s [--gradeN] [--quiz/--place] dictionary_file_name\n", argv[0]);
             return 0;
         }
@@ -592,10 +588,10 @@ int main(int argc, char *argv[])
         for (int i = 0; i < context.total; ++i)
             context.list[i].grade = selected_grade;
     }
-    printf("c-class,d-definition,r-read again,q-quit, clear-clear progress\n");
+    printf("c-class,d-definition,r-read again,q-quit\n");
     printf("--------------------------------------------------------------\n");
 
-    read_sentence_online("enter username");
+    play("username.mp3");
     printf("Enter username: ");
     fgets(stats_filename, 20, stdin);
     trim(stats_filename);
