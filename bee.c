@@ -15,13 +15,14 @@
 
 #define DICT_VER_BASIC      0
 #define GRADE_CEILING       255
+#define BEECEILING          8
 
 #define PRACTICE            0
 #define QUIZ                1
 #define PLACE               2
 
 #define RC_UNKNOWN          0
-#define RC_FINIAHED_ALL     1
+#define RC_FINISHED_ALL     1
 #define RC_QUIT             2
 
 #define bool        int
@@ -57,6 +58,7 @@ typedef struct tagContext {
     int  selected_total;
     int  max_words;
     int  suggested_grade;
+    int mode;
 } Context;
 
 int loadstats(Stats *info, char *filename) {
@@ -413,8 +415,8 @@ int name_to_grade(char *filename) {
 int present(Context *context, Stats *currentinfo) {
     char buff[255];
     bool more = true;
-    
-    int ret = RC_FINIAHED_ALL;
+
+    int ret = RC_FINISHED_ALL;
     while (more && context->selected < context->selected_total) {
         int wordnum = context->index[context->selected++];
         ++currentinfo->asked;
@@ -466,6 +468,9 @@ int present(Context *context, Stats *currentinfo) {
             else {
                 failed_already=true;
                 play("sorry.wav");
+                if (context->mode == PLACE) {
+                    break;
+                }
             }
         }
     }
@@ -497,7 +502,7 @@ int do_quiz(Context *context, int selected_grade, Stats *currentinfo) {
         int tmp = context->index[sel1];
         context->index[sel1]=context->index[sel2];
         context->index[sel2]=tmp;
-    }   
+    }
     if (context->max_words > 0 && context->max_words < context->selected_total)
         context->selected_total = context->max_words;
 
@@ -505,9 +510,26 @@ int do_quiz(Context *context, int selected_grade, Stats *currentinfo) {
 }
 
 int do_placement(Context *context, Stats *currentinfo) {
-    //printf("your passed grade %d. Now we will test you  grade %d words\n", limit, limit+1);
-    //printf("your suggested grade level is %d\n", limit);
-    return -1;
+    context->max_words = 10;
+    context->suggested_grade = BEECEILING;
+    for(int i=1; i<=BEECEILING;  i++) {
+        memset(currentinfo, 0, sizeof(Stats));
+        int status = do_quiz(context, i, currentinfo);
+        if (status == RC_QUIT) {
+            return RC_QUIT;
+        }
+        if (currentinfo-> correct<BEECEILING) {
+            context->suggested_grade= i;
+            break;
+        }
+        if (i<BEECEILING) {
+            printf("you passed grade %d. Next we will test you grade %d words\n", i, i+1);
+        }
+        else{ 
+            printf("you passed all grades! You should go to the next list.\n");
+        }
+    }
+    return RC_FINISHED_ALL;
 }
 
 int main(int argc, char *argv[])
@@ -519,7 +541,7 @@ int main(int argc, char *argv[])
     int selected_grade;
     int dict_ver;
     int mode;
- 
+
     memset (&context, 0, sizeof (context));
     //default dictionary
     strcpy(dict_filename, "dict/SpellingBee2018.txt");
@@ -528,14 +550,15 @@ int main(int argc, char *argv[])
     mode = PRACTICE;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--help")==0) {
-            //print help menu
-            printf("%s --gradeN dictionary_file_name\n", argv[0]);
+            //print help menuprintf("your correct percentage or ratio was %d out of %d or %.3f%% today\n", currentinfo.correct, currentinfo.asked, (float)currentinfo.correct/currentinfo.asked*100);
+            printf("you asked for help %d times out of %d possible times today. %f%% is your percentage for asking for help today\n", currentinfo.help, currentinfo.asked*2, (float)currentinfo.help/currentinfo.asked * 2 *100);
+            printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
+            printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.asked * 2*100);
+            printf("%s [--gradeN] [--quiz/--place] dictionary_file_name\n", argv[0]);
             return 0;
         }
-
         else if (strncmp(argv[i], "--grade", 7) == 0) {
             selected_grade = argv[i][7]-'0';
-
         }
         else if (strcmp (argv[i], "--quiz") == 0) {
             mode = QUIZ;
@@ -551,6 +574,7 @@ int main(int argc, char *argv[])
     if (mode == PLACE) {
         strcpy(dict_filename, "dict/SpellingBee2018.txt");
     }
+    context.mode = mode;
     context.list = calloc(LISTLEN, sizeof (Word));
     context.total= load (dict_filename, context.list, &dict_ver);
     printf("Total %d words in %s\n", context.total, dict_filename);
@@ -582,17 +606,17 @@ int main(int argc, char *argv[])
     memset(&info, 0, sizeof(info));
     loadstats(&info, stats_filename);
     context.selected = info.progress[selected_grade];
-    
+
     memset(&currentinfo, 0, sizeof(currentinfo));
     int ret = RC_UNKNOWN;
     switch (mode) {
-        case PRACTICE:
+    case PRACTICE:
         ret = do_practice(&context, selected_grade, &currentinfo);
         break;
-        case QUIZ:
+    case QUIZ:
         ret = do_quiz(&context, selected_grade, &currentinfo);
         break;
-        case PLACE:
+    case PLACE:
         ret = do_placement(&context, &currentinfo);
         break;
     }
@@ -609,15 +633,15 @@ int main(int argc, char *argv[])
     play("bye.wav");
 
     switch (mode) {
-        case PRACTICE:
-        case QUIZ:
+    case PRACTICE:
+    case QUIZ:
         printf("your correct percentage or ratio was %d out of %d or %.3f%% today\n", currentinfo.correct, currentinfo.asked, (float)currentinfo.correct/currentinfo.asked*100);
         printf("you asked for help %d times out of %d possible times today. %f%% is your percentage for asking for help today\n", currentinfo.help, currentinfo.asked*2, (float)currentinfo.help/currentinfo.asked * 2 *100);
         printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
         printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.asked * 2*100);
         break;
-        case PLACE:
-        if (ret == RC_FINIAHED_ALL) {
+    case PLACE:
+        if (ret == RC_FINISHED_ALL && context.suggested_grade!=BEECEILING) {
             printf("your suggested grade level is %d\n", context.suggested_grade);
         }
         break;
@@ -625,4 +649,4 @@ int main(int argc, char *argv[])
 
     return 0;
 }
-    
+
