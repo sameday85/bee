@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include "common.h"
 
 #define WORDLEN       25
 #define CLASSLEN      15
@@ -24,10 +25,6 @@
 #define RC_UNKNOWN          0
 #define RC_FINISHED_ALL     1
 #define RC_QUIT             2
-
-#define bool        int
-#define false        0 //must be zero
-#define true         1
 
 
 typedef struct tagWord
@@ -110,79 +107,7 @@ void print_word(Word *pword) {
     //printf ("[%d-%d]%s:%s:%s\n", pword->grade, pword->seq, pword->word, pword->class, pword->def);
 }
 
-//https://stackoverflow.com/questions/24321295/how-can-i-download-a-file-using-c-socket-programming
-//only http protocol supported
-bool download_url (char *url, char *filename) {
-    char *prefix="http://";
-    if (strncmp(url, prefix, strlen(prefix)) != 0)
-        return false;
 
-    struct addrinfo hints, *servinfo;
-    char domain[255];
-
-    char *request = strchr(url + strlen(prefix) + 1, '/');
-    int len = request - url - strlen(prefix);
-    strncpy (domain, url + strlen(prefix), len);
-    domain[len]='\0';
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC; // use AF_INET6 to force IPv6
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(domain, "http", &hints, &servinfo) != 0) {
-        return false;
-    }
-
-    int total_len = 0;
-    //Create socket
-    int socket_desc = socket(AF_INET, SOCK_STREAM, 0);
-    if (socket_desc != -1) {
-        //Connect to remote server
-        if (connect(socket_desc, (struct sockaddr *)servinfo->ai_addr, servinfo->ai_addrlen) == 0) {
-            //Send request
-            char message[255];
-            sprintf(message, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", request, domain);
-            if (send(socket_desc, message, strlen(message), 0) > 0) {
-                FILE *file = fopen(filename, "w");
-                if (file) {
-                    bool error = true;
-                    int   max_len = 1024 * 1024;  //1mb
-                    char *reply=malloc(max_len);
-                    //http response header
-                    int len = recv(socket_desc, reply, max_len, 0);
-                    if (len > 0) {
-                        if (strstr(reply, "HTTP/1.1 200 OK") == reply) {
-                            char *ptr = strstr (reply, "\r\n\r\n");
-                            if (ptr) {
-                                ptr += 4;
-                                len -= ptr - reply;
-                                fwrite(ptr, len, 1, file);
-                                total_len += len;
-
-                                error = false;
-                            }
-                        }
-                    }
-                    if (error == false) {
-                        len = recv(socket_desc, reply, max_len, 0);
-                        while (len > 0) {
-                            fwrite(reply, len, 1, file);
-                            total_len += len;
-                            len = recv(socket_desc, reply, max_len, 0);
-                        }
-                    }
-                    free(reply);
-                    fclose(file);
-                    if (error)
-                        remove(filename);
-                }
-            }
-        }
-        shutdown (socket_desc, SHUT_RD);
-    }
-    freeaddrinfo(servinfo);
-
-    return total_len > 0 ? true : false;
-}
 /*
 15.
 
@@ -380,10 +305,12 @@ void read_word(char *word, char *mp3_url) {
     sprintf(voice, "voice/%s.mp3", word);
 
     bool mp3_available = false;
-
     FILE *file = fopen (voice, "r");
     if (file == NULL) {
-        if (download_url(url, voice)) {
+        if (download(url, NULL, NULL, voice, true)==200) {
+            mp3_available = true;
+        }
+        else if (download_soundoftext(word, voice) == 200) {
             mp3_available = true;
         }
     }
