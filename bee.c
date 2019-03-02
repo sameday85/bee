@@ -26,7 +26,6 @@
 #define RC_FINISHED_ALL     1
 #define RC_QUIT             2
 
-
 typedef struct tagWord
 {
     int grade;
@@ -153,7 +152,6 @@ int load_word(FILE *fp, Word *pword, int grade, int sequence) {
 
     print_word(pword);
 }
-
 int loadV10 (FILE *fp, Word* list) {
     char *str, buff[1000];
     int wordcount = 0;
@@ -175,10 +173,8 @@ int loadV10 (FILE *fp, Word* list) {
         str = fgets(buff, sizeof(buff), fp);
         trim(buff);
     }
-
     return wordcount;
 }
-
 int loadV11 (FILE *fp, Word* list) {
     char *str, buff[1000];
     int wordcount = 0;
@@ -189,10 +185,8 @@ int loadV11 (FILE *fp, Word* list) {
         trim(buff);
         if (strlen (buff) <= 0)
             break;
-        ++wordcount;
         list[wordcount].grade = 0;
-        list[wordcount].seq   = wordcount;
-
+        list[wordcount].seq   = wordcount+1;
         //word
         strcpy (list[wordcount].word, buff);
         //category
@@ -214,6 +208,7 @@ int loadV11 (FILE *fp, Word* list) {
         //skip blank line
         fgets(buff, sizeof(buff), fp);
 
+        ++wordcount;
         str = fgets(buff, sizeof(buff), fp);
     }
 
@@ -255,7 +250,6 @@ int load (char* filename, Word* list, int *ver) {
 int play( char *audio_file) {
     char command[256];
     int status;
-
     /* create command to execute */
     sprintf( command, "omxplayer -o local %s >/dev/null", audio_file);
 
@@ -281,7 +275,6 @@ void read_sentence_online(char *sentence) {
     sprintf(command, "./speech.sh \"%s\"", sentence);
     system(command );
 }
-
 void read_sentence_offline(char *sentence) {
     if (strlen(sentence) <= 0)
         return;
@@ -307,7 +300,7 @@ void read_word(char *word, char *mp3_url) {
     bool mp3_available = false;
     FILE *file = fopen (voice, "r");
     if (file == NULL) {
-        if (download(url, NULL, NULL, voice, true)==200) {
+        if (download(url, NULL, NULL, voice, true) == 200) {
             mp3_available = true;
         }
         else if (download_soundoftext(word, voice) == 200) {
@@ -338,7 +331,6 @@ int name_to_grade(char *filename) {
     grade = base + (grade % (max - base));
     return grade;
 }
-
 int present(Context *context, Stats *currentinfo) {
     char buff[255];
     bool more = true;
@@ -348,10 +340,10 @@ int present(Context *context, Stats *currentinfo) {
         int wordnum = context->index[context->selected++];
         ++currentinfo->asked;
         bool failed_already = false;
-        for (;;) {
-            fseek(stdin,0,SEEK_END);
+        for (int i = 0; i < 20; ++i) {
             read_word(context->list[wordnum].word, NULL);
             printf("[%d:%03d]Enter the word spelling: ", context->list[wordnum].grade, context->selected);
+            memset (buff, 0, sizeof (buff));
             fgets(buff, sizeof(buff), stdin);
             trim(buff);
             if (strcmp(buff, "c")==0) {
@@ -373,7 +365,8 @@ int present(Context *context, Stats *currentinfo) {
             else if (strcmp(buff, "?")==0) {
                 printf("%s\n", context->list[wordnum].word);
                 failed_already=true;
-                break;
+                if (context->mode != PRACTICE) 
+                    break;
             }
             else if (strcmp(buff, "q")==0) {
                 more = false;
@@ -403,7 +396,6 @@ int present(Context *context, Stats *currentinfo) {
     }
     return ret;
 }
-
 int do_practice (Context *context, int selected_grade, Stats *currentinfo) {
     for (int i = 0; i < context->total; ++i) {
         if ((selected_grade == 0) || context->list[i].grade == 0 || (context->list[i].grade == selected_grade)) {
@@ -414,7 +406,6 @@ int do_practice (Context *context, int selected_grade, Stats *currentinfo) {
         context->selected = 0;
     return present (context, currentinfo);
 }
-
 int do_quiz(Context *context, int selected_grade, Stats *currentinfo) {
     context->selected = 0;
     for (int i = 0; i < context->total; ++i) {
@@ -432,10 +423,8 @@ int do_quiz(Context *context, int selected_grade, Stats *currentinfo) {
     }
     if (context->max_words > 0 && context->max_words < context->selected_total)
         context->selected_total = context->max_words;
-
     return present (context, currentinfo);
 }
-
 int do_placement(Context *context, Stats *currentinfo) {
     context->max_words = 10;
     context->suggested_grade = BEECEILING;
@@ -458,7 +447,6 @@ int do_placement(Context *context, Stats *currentinfo) {
     }
     return RC_FINISHED_ALL;
 }
-
 int main(int argc, char *argv[])
 {
     Context context;
@@ -545,10 +533,11 @@ int main(int argc, char *argv[])
     }
     free (context.list);
     free (context.index);
-
-    info.asked  += currentinfo.asked;
-    info.correct+= currentinfo.correct;
-    info.help   += currentinfo.help;
+    if (mode != PLACE) {
+        info.asked  += currentinfo.asked;
+        info.correct+= currentinfo.correct;
+        info.help   += currentinfo.help;
+    }
     if (mode == PRACTICE) {
         info.progress[selected_grade] = context.selected - 1;
     }
@@ -559,9 +548,9 @@ int main(int argc, char *argv[])
     case PRACTICE:
     case QUIZ:
         printf("your correct percentage or ratio was %d out of %d or %.3f%% today\n", currentinfo.correct, currentinfo.asked, (float)currentinfo.correct/currentinfo.asked*100);
-        printf("you asked for help %d times out of %d possible times today. %f%% is your percentage for asking for help today\n", currentinfo.help, currentinfo.asked*2, (float)currentinfo.help/currentinfo.asked * 2 *100);
+        printf("you asked for help %d times out of %d possible times today. %f%% is your percentage for asking for help today\n", currentinfo.help, currentinfo.asked*2, (float)currentinfo.help/(currentinfo.asked * 2) *100);
         printf("your correct percentage or ratio was %d out of %d or %.3f%%\n", info.correct, info.asked, (float)info.correct/info.asked*100);
-        printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/info.asked * 2*100);
+        printf("you asked for help %d times out of %d possible times. %f%% is your percentage for asking for help\n", info.help, info.asked*2, (float)info.help/(info.asked * 2)*100);
         break;
     case PLACE:
         if (ret == RC_FINISHED_ALL && context.suggested_grade!=BEECEILING) {

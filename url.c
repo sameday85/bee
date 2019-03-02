@@ -62,6 +62,8 @@ long download(char *url, char *post_fields, char *content_type, char *output, bo
     }
     if (pagefile) {
         fclose(pagefile);
+        if (http_code != 200)
+            remove(output);
     }
     if (headers)
         curl_slist_free_all(headers);
